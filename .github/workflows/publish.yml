@@ -3,7 +3,7 @@ name: Publish daily football news to GitHub Pages
 on:
   schedule:
     # 每日 08:10（HKT）執行；HKT=UTC+8，所以用 00:10 UTC
-    - cron: '10 0 * * *'
+    - cron: '0 4 * * *'
   workflow_dispatch: {}  # 允許你手動「Run workflow」
 
 jobs:
