@@ -1,24 +1,47 @@
-name: Minimal Pages Deploy
+name: Publish daily football news to GitHub Pages
 
 on:
-  workflow_dispatch: {}
   schedule:
-    - cron: '5 3 * * *'   # 11:05 HKT，方便你即刻看到排程也能過
+    - cron: '10 3 * * *'   # 11:10 HKT
+    - cron: '40 3 * * *'   # 11:40 HKT（保險）
+  workflow_dispatch: {}
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TZ: Asia/Hong_Kong
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create minimal index.html
-        run: |
-          echo '<!doctype html><meta charset="utf-8"><title>OK</title><body style="font-family:system-ui">Minimal ok</body>' > index.html
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: Publish to gh-pages
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run scraper (HKT window)
+        run: |
+          python news_scraper.py || true
+          LATEST=$(ls -1 news_summary_*.html 2>/dev/null | tail -n 1 || true)
+          if [ -n "$LATEST" ]; then
+            cp "$LATEST" index.html
+            mkdir -p archive
+            cp "$LATEST" archive/
+          else
+            NOW=$(date +"%Y-%m-%d %H:%M HKT")
+            echo "<!doctype html><meta charset='utf-8'><title>每日足球新聞摘要（暫無更新）</title><body style='font-family:system-ui,-apple-system,Segoe UI,Roboto;max-width:800px;margin:32px auto;padding:0 16px'><h1>每日足球新聞摘要</h1><p>香港時間 $NOW：24 小時內暫未擷取到新文章，或來源網站短暫不可用。</p><p>可稍後再進入本頁查看，或到 GitHub Actions 手動 Re-run。</p></body>" > index.html
+          fi
+
+      - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
