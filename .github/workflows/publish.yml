@@ -2,10 +2,10 @@ name: Publish daily football news to GitHub Pages
 
 on:
   schedule:
-    # 每日 08:10（HKT）執行；HKT=UTC+8，所以用 00:10 UTC
-    - cron: '10 3 * * *'   # 11:10 HKT
-    - cron: '40 3 * * *'   # 11:40 HKT（保險）
-  workflow_dispatch: {}  # 允許你手動「Run workflow」
+    # 11:10 HKT 與 11:40 HKT（UTC 要減 8 小時）
+    - cron: '10 3 * * *'   # 03:10 UTC = 11:10 HKT
+    - cron: '40 3 * * *'   # 03:40 UTC = 11:40 HKT（保險再跑一次）
+  workflow_dispatch: {}
 
 jobs:
   build-and-deploy:
@@ -30,13 +30,31 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run scraper (HKT window)
+        shell: bash
         run: |
-          python news_scraper.py
-          # 將最新輸出複製為 index.html，作為網站首頁
-          ls -1 news_summary_*.html | tail -n 1 | xargs -I {} cp "{}" index.html
-          # 可選：保留歷史檔
-          mkdir -p archive
-          ls -1 news_summary_*.html | tail -n 1 | xargs -I {} cp "{}" archive/
+          set -e
+          python news_scraper.py || true
+
+          # 取最新輸出；如無，落入 fallback 生成一個帶時間戳的首頁
+          LATEST=$(ls -1 news_summary_*.html 2>/dev/null | tail -n 1 || true)
+          if [ -n "$LATEST" ]; then
+            echo "[+] Found output: $LATEST"
+            cp "$LATEST" index.html
+            mkdir -p archive
+            cp "$LATEST" archive/
+          else
+            NOW=$(date +"%Y-%m-%d %H:%M HKT")
+            echo "[!] No news_summary_*.html generated. Creating fallback index.html at $NOW"
+            cat > index.html <<EOF
+<!doctype html><meta charset="utf-8">
+<title>每日足球新聞摘要（暫無更新）</title>
+<body style="font-family:system-ui,-apple-system,Segoe UI,Roboto;max-width:800px;margin:32px auto;padding:0 16px">
+<h1>每日足球新聞摘要</h1>
+<p>香港時間 $NOW：24 小時內暫未擷取到新文章，或來源網站短暫不可用。</p>
+<p>可稍後重載本頁，或到 GitHub Actions 手動 Re-run。</p>
+</body>
+EOF
+          fi
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v3
