@@ -38,15 +38,77 @@ def hk_now():
 def hk_today():
     return hk_now().date()
 
+# ======== 只針對亂碼：智能解碼（特別處理 on.cc Big5） ========
+
+def _looks_mojibake(s: str) -> float:
+    """估算亂碼比例（ 、典型 UTF8→Latin1 殘碼、控制字元）"""
+    if not s:
+        return 1.0
+    bad = s.count(" ")
+    bad += len(re.findall(r"[åæçøØÅÆÇœŒÐðþÞƒ]", s))        # 常見殘碼
+    bad += len([c for c in s if ord(c) < 32 and c not in "\n\r\t"])
+    return bad / max(1, len(s))
+
+def _cjk_ratio(s: str) -> float:
+    """中文比例，用作挑選最佳解碼"""
+    if not s:
+        return 0.0
+    cjk = sum(1 for c in s if '\u4e00' <= c <= '\u9fff')
+    return cjk / len(s)
+
+def _decode_oncc_best(data: bytes) -> str:
+    """對 on.cc 原始 bytes 試多種 Big5 家族＋chardet，揀最少亂碼＋中文字比例高者"""
+    candidates = []
+    for enc in ("big5hkscs", "big5", "cp950"):
+        try:
+            candidates.append(data.decode(enc))
+        except UnicodeDecodeError:
+            pass
+    try:
+        guess = (chardet.detect(data).get("encoding") or "").lower()
+        if guess:
+            candidates.append(data.decode(guess, errors="ignore"))
+    except Exception:
+        pass
+    try:
+        candidates.append(data.decode("big5", errors="ignore"))
+    except Exception:
+        pass
+
+    best, best_score = None, -1.0
+    for txt in candidates:
+        score = (1.0 - _looks_mojibake(txt)) + 0.5 * _cjk_ratio(txt)
+        if score > best_score:
+            best, best_score = txt, score
+    return best or data.decode("big5", errors="ignore")
+
 def fetch_html(url):
+    """只改解碼策略，其餘邏輯不變"""
     resp = requests.get(url, headers=HEADERS, timeout=15)
+    data = resp.content  # 以 bytes 來自行解碼更穩陣
+
+    # on.cc：智能 Big5 解碼
     if "football.on.cc" in url:
-        enc = (chardet.detect(resp.content).get("encoding") or "").lower()
-        resp.encoding = "big5" if ("big5" in enc or not enc) else enc
-    else:
-        resp.encoding = resp.apparent_encoding or "utf-8"
-    resp.raise_for_status()
-    return resp.text
+        return _decode_oncc_best(data)
+
+    # 星島／am730：固定 UTF-8，失敗再用 chardet
+    if "stheadline.com" in url or "am730.com.hk" in url:
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            enc = (chardet.detect(data).get("encoding") or "utf-8")
+            return data.decode(enc, errors="ignore")
+
+    # 其他：apparent -> chardet -> utf-8 忽略錯
+    enc = (resp.apparent_encoding or "").lower()
+    if not enc or enc == "ascii":
+        enc = (chardet.detect(data).get("encoding") or "utf-8")
+    try:
+        return data.decode(enc)
+    except Exception:
+        return data.decode("utf-8", errors="ignore")
+
+# ========================================================
 
 def _oncc_title_from_soup(soup):
     # 1) og:title
@@ -281,18 +343,26 @@ def grab_oncc_for_date(d: datetime.date, now_hk):
         slug = f"fbnewa01{i:02d}x0.html"
         href = base + slug
         try:
-            html = fetch_html(href)
+            resp = requests.get(href, headers=HEADERS, timeout=10)
+            if resp.status_code != 200:
+                continue   # ⚠️ 忽略 404 / 非200，不加到 out
+            html = _decode_oncc_best(resp.content)
         except Exception:
-            break  # 該日已無更多
+            continue
         pub_dt = datetime.datetime(d.year, d.month, d.day, tzinfo=HK_TZ)
         if not in_last_24h(pub_dt, now_hk):
             continue
         title, _desc, _soup = parse_title_summary(html, href)
         out.append({
-            "site":"oncc","url":href,"title":title,
-            "summary":"", "tips":[], "pubDate":pub_dt.isoformat()
+            "site": "oncc",
+            "url": href,
+            "title": title,
+            "summary": "",
+            "tips": [],
+            "pubDate": pub_dt.isoformat()
         })
     return out[:MAX_PER_SOURCE]
+
 
 # ---------------- HTML ----------------
 
@@ -327,7 +397,7 @@ def build_html(date_str, bundles):
         else:
             html.append("<ul>")
             for it in items:
-                line1 = f"【{esc(sname)}】—「{esc(it['title'])}」"
+                line1 = f"—「{esc(it['title'])}」"
                 html.append("<li>")
                 html.append(f"<div>{line1}　<a href='{esc(it['url'])}' target='_blank' rel='noopener'>（直達連結）</a></div>")
                 if sid != "oncc":
