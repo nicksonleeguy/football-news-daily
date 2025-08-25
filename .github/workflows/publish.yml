@@ -2,9 +2,8 @@ name: Publish daily football news to GitHub Pages
 
 on:
   schedule:
-    # 03:10 UTC = 11:10 HKT；03:40 UTC = 11:40 HKT（保險）
-    - cron: '10 3 * * *'
-    - cron: '40 3 * * *'
+    - cron: '10 3 * * *'   # 11:10 HKT
+    - cron: '40 3 * * *'   # 11:40 HKT
   workflow_dispatch: {}
 
 jobs:
@@ -30,30 +29,18 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run scraper (HKT window)
-        shell: bash
         run: |
-          set -e
           python news_scraper.py || true
 
-          # 取最新輸出；如無，產生 fallback 首頁確保會刷新
-          LATEST="$(ls -1 news_summary_*.html 2>/dev/null | tail -n 1 || true)"
+          # 確保有 index.html
+          LATEST=$(ls -1 news_summary_*.html 2>/dev/null | tail -n 1 || true)
           if [ -n "$LATEST" ]; then
-            echo "[+] Found output: $LATEST"
             cp "$LATEST" index.html
             mkdir -p archive
             cp "$LATEST" archive/
           else
-            NOW="$(date +"%Y-%m-%d %H:%M HKT")"
-            echo "[!] No news_summary_*.html. Creating fallback index.html at $NOW"
-            printf '%s\n' \
-'<!doctype html><meta charset="utf-8">' \
-'<title>每日足球新聞摘要（暫無更新）</title>' \
-'<body style="font-family:system-ui,-apple-system,Segoe UI,Roboto;max-width:800px;margin:32px auto;padding:0 16px">' \
-'<h1>每日足球新聞摘要</h1>' \
-"<p>香港時間 ${NOW}：24 小時內暫未擷取到新文章，或來源網站短暫不可用。</p>" \
-'<p>可稍後再進入本頁查看，或到 GitHub Actions 手動 Re-run。</p>' \
-'</body>' \
-> index.html
+            NOW=$(date +"%Y-%m-%d %H:%M HKT")
+            echo "<!doctype html><meta charset='utf-8'><title>每日足球新聞摘要（暫無更新）</title><body><h1>每日足球新聞摘要</h1><p>香港時間 $NOW：暫未擷取到新文章，或來源網站短暫不可用。</p></body>" > index.html
           fi
 
       - name: Deploy to gh-pages
