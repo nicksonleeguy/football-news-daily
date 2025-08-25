@@ -1,10 +1,10 @@
 name: Publish daily football news to GitHub Pages
 
 on:
+  workflow_dispatch: {}   # 👈 呢行一定要有
   schedule:
     - cron: '10 3 * * *'   # 11:10 HKT
-    - cron: '40 3 * * *'   # 11:40 HKT（保險）
-  workflow_dispatch: {}
+    - cron: '40 3 * * *'   # 11:40 HKT
 
 jobs:
   build-and-deploy:
